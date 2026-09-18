@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Live Concierge - WebMCP & Shopify Commerce",
+  "version": "1.0.0",
+  "description": "Real-time bidirectional voice & video shopping assistant powered by Gemini Live API and WebMCP.",
+  "icons": {
+    "16": "vite.svg",
+    "48": "vite.svg",
+    "128": "vite.svg"
+  },
+  "action": {
+    "default_title": "Open Gemini Live Concierge",
+    "default_popup": "index.html"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  }
+}
