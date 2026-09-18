@@ -17,6 +17,7 @@ export function App() {
     status,
     videoRef,
     canvasRef,
+    mediaStream,
     isAudioPlaying,
     isUserTalking,
     micVolume,
@@ -90,6 +91,7 @@ export function App() {
       {isVideoEnabled && isConnected && (
         <CameraPreview
           videoRef={videoRef}
+          stream={mediaStream}
           cameraFacing={cameraFacing}
           stageRef={stageRef}
           onFlip={flipCamera}

@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 
 interface CameraPreviewProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  stream?: MediaStream | null;
   cameraFacing: 'user' | 'environment';
   stageRef: React.RefObject<HTMLDivElement | null>;
   onFlip: () => void;
@@ -11,11 +12,21 @@ interface CameraPreviewProps {
 
 export const CameraPreview: React.FC<CameraPreviewProps> = ({
   videoRef,
+  stream,
   cameraFacing,
   stageRef,
   onFlip,
 }) => {
   const lastTapRef = useRef(0);
+
+  React.useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch((err) => {
+        console.warn("Camera preview play error:", err);
+      });
+    }
+  }, [stream, videoRef]);
 
   const handleTap = () => {
     const now = Date.now();

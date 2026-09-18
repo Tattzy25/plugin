@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { GoogleGenAI, Modality, type LiveServerMessage } from "@google/genai";
+import { GoogleGenAI, Modality, ThinkingLevel, type LiveServerMessage } from "@google/genai";
 import { toast } from "sonner";
 import { getPopulatedSessionTools } from "../lib/GeminiTools";
 import { webMcp } from "../lib/MCP/webMcpClient";
@@ -86,6 +86,7 @@ export function useGeminiLive(
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [sessionDurationMs, setSessionDurationMs] = useState(0);
   const [consentTranscription, setConsentTranscriptionState] = useState(false);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
   const isMutedRef = useRef(false);
   const isVideoEnabledRef = useRef(true);
@@ -201,6 +202,7 @@ export function useGeminiLive(
       streamRef.current = null;
     }
 
+    setMediaStream(null);
     setMicVolume(0);
     setIsUserTalking(false);
   }, [stopVideoCapture]);
@@ -214,6 +216,10 @@ export function useGeminiLive(
   }, []);
 
   const enqueueOutputPCM = useCallback((pcm: Int16Array) => {
+    if (outputCtxRef.current?.state === "suspended") {
+      void outputCtxRef.current.resume().catch(console.warn);
+    }
+
     pendingOutputRef.current.push(pcm);
     pendingOutputSamplesRef.current += pcm.length;
 
@@ -258,12 +264,12 @@ export function useGeminiLive(
       return;
     }
 
-    if (videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
-
-    if (videoRef.current.srcObject !== streamRef.current) {
+    if (videoRef.current.srcObject !== streamRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
-      void videoRef.current.play();
+      void videoRef.current.play().catch(console.warn);
     }
+
+    if (videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
 
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
@@ -275,7 +281,7 @@ export function useGeminiLive(
     if (!base64Data) return;
 
     sessionRef.current.sendRealtimeInput({
-      video: {
+      media: {
         data: base64Data,
         mimeType: "image/jpeg",
       },
@@ -353,10 +359,11 @@ export function useGeminiLive(
     });
 
     streamRef.current = stream;
+    setMediaStream(stream);
 
     if (videoRef.current) {
       videoRef.current.srcObject = stream;
-      void videoRef.current.play();
+      void videoRef.current.play().catch(console.warn);
     }
 
     const inputContext = inputCtxRef.current!;
@@ -427,7 +434,7 @@ export function useGeminiLive(
       const pcm = new Int16Array(event.data);
 
       sessionRef.current.sendRealtimeInput({
-        audio: {
+        media: {
           data: pcm16ToBase64(pcm),
           mimeType: `audio/pcm;rate=${INPUT_RATE}`,
         },
@@ -462,10 +469,11 @@ export function useGeminiLive(
     if (!newVideoTrack) return;
 
     streamRef.current.addTrack(newVideoTrack);
+    setMediaStream(new MediaStream(streamRef.current.getTracks()));
 
     if (videoRef.current) {
       videoRef.current.srcObject = streamRef.current;
-      void videoRef.current.play();
+      void videoRef.current.play().catch(console.warn);
     }
 
     if (isSessionOpenRef.current && isVideoEnabledRef.current) {
@@ -520,6 +528,7 @@ export function useGeminiLive(
           config: {
             responseModalities: [Modality.AUDIO],
             systemInstruction: systemMessageSettings.systemInstruction,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
 
             tools: sessionTools as any,
 
@@ -547,6 +556,18 @@ export function useGeminiLive(
               setStatus("live");
               resetPlayback();
               beginSessionTracking();
+
+              if (outputCtxRef.current?.state === "suspended") {
+                void outputCtxRef.current.resume().catch(console.warn);
+              }
+
+              try {
+                sessionRef.current?.sendRealtimeInput({
+                  text: "Hello! I just connected to the live session. Please greet me in your opening style.",
+                });
+              } catch (greetingErr) {
+                console.warn("Failed to send initial greeting prompt:", greetingErr);
+              }
             },
             onmessage: async (message: LiveServerMessage) => {
               if (message.toolCall) {
@@ -744,6 +765,7 @@ export function useGeminiLive(
     sessionDurationMs,
     videoRef,
     canvasRef,
+    mediaStream,
     startConnection,
     disconnect,
     sendText,
