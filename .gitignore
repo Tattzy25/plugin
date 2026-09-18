@@ -1,1 +1,4 @@
 .vercel
+*.log
+debug.log
+node_modules

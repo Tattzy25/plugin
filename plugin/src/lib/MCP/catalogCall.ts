@@ -23,7 +23,7 @@ export async function callCatalogMcp(
               profile: AGENT_PROFILE_URL,
             },
           },
-          ...(args ?? {}),
+          ...(args && typeof args === "object" ? args : {}),
         },
       },
     }),

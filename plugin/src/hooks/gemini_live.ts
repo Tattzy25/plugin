@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { GoogleGenAI, Modality, ThinkingLevel, type LiveServerMessage } from "@google/genai";
 import { toast } from "sonner";
 import { getPopulatedSessionTools } from "../lib/GeminiTools";
-import { webMcp } from "../lib/MCP/webMcpClient";
+import { callCatalogMcp } from "../lib/MCP/catalogCall";
 
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
@@ -17,20 +17,6 @@ type LiveSystemMessageSettings = {
 };
 
 type TranscriptItem = { role: "user" | "agent"; text: string };
-
-type McpToolCallResult = {
-  result?: {
-    content?: Array<{
-      type?: string;
-      text?: string;
-      [key: string]: unknown;
-    }>;
-    structuredContent?: unknown;
-    [key: string]: unknown;
-  };
-  error?: unknown;
-  [key: string]: unknown;
-};
 
 function pcm16ToBase64(pcm: Int16Array): string {
   const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
@@ -55,13 +41,16 @@ function base64ToPCM16(base64: string): Int16Array {
   return new Int16Array(bytes.buffer);
 }
 
-function unwrapMcpResult(payload: McpToolCallResult): unknown {
-  const text = payload.result?.content?.find(
-    (content) => content.type === "text" && typeof content.text === "string",
+function unwrapMcpResult(payload: any): unknown {
+  if (payload?.error) {
+    return payload.error;
+  }
+  const text = payload?.result?.content?.find(
+    (content: any) => content?.type === "text" && typeof content?.text === "string",
   )?.text;
 
   if (!text) {
-    return payload.result?.structuredContent ?? payload;
+    return payload?.result?.structuredContent ?? payload?.result ?? payload;
   }
 
   try {
@@ -254,15 +243,7 @@ export function useGeminiLive(
   }, []);
 
   const captureFrame = useCallback(() => {
-    if (
-      !isVideoEnabledRef.current ||
-      !sessionRef.current ||
-      !isSessionOpenRef.current ||
-      !videoRef.current ||
-      !canvasRef.current
-    ) {
-      return;
-    }
+    if (!videoRef.current || !canvasRef.current || !sessionRef.current || !isSessionOpenRef.current) return;
 
     if (videoRef.current.srcObject !== streamRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
@@ -280,12 +261,16 @@ export function useGeminiLive(
     const base64Data = canvas.toDataURL("image/jpeg", 0.75).split(",")[1];
     if (!base64Data) return;
 
-    sessionRef.current.sendRealtimeInput({
-      media: {
-        data: base64Data,
-        mimeType: "image/jpeg",
-      },
-    });
+    try {
+      sessionRef.current.sendRealtimeInput({
+        video: {
+          data: base64Data,
+          mimeType: "image/jpeg",
+        },
+      });
+    } catch {
+      // ignore
+    }
   }, []);
 
   const startVideoCapture = useCallback(() => {
@@ -431,18 +416,20 @@ export function useGeminiLive(
         return;
       }
 
-      const pcm = new Int16Array(event.data);
+      try {
+        const pcm = new Int16Array(event.data);
 
-      sessionRef.current.sendRealtimeInput({
-        media: {
-          data: pcm16ToBase64(pcm),
-          mimeType: `audio/pcm;rate=${INPUT_RATE}`,
-        },
-      });
+        sessionRef.current.sendRealtimeInput({
+          audio: {
+            data: pcm16ToBase64(pcm),
+            mimeType: `audio/pcm;rate=${INPUT_RATE}`,
+          },
+        });
+      } catch {
+        // ignore
+      }
     };
-
-    startVideoCapture();
-  }, [startVideoCapture]);
+  }, []);
 
   const flipCamera = useCallback(async () => {
     if (!streamRef.current) return;
@@ -521,13 +508,17 @@ export function useGeminiLive(
           httpOptions: { apiVersion: "v1alpha" },
         });
 
-        const sessionTools = await getPopulatedSessionTools();
+        const { tools: sessionTools, error: mcpError } = await getPopulatedSessionTools();
+
+        const systemInstructionText = mcpError
+          ? `${systemMessageSettings.systemInstruction}\n\n[MCP Server Status: ${mcpError}]`
+          : systemMessageSettings.systemInstruction;
 
         const session = await ai.live.connect({
           model: systemMessageSettings.model || "gemini-3.1-flash-live-preview",
           config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: systemMessageSettings.systemInstruction,
+            systemInstruction: systemInstructionText,
             thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
 
             tools: sessionTools as any,
@@ -561,12 +552,15 @@ export function useGeminiLive(
                 void outputCtxRef.current.resume().catch(console.warn);
               }
 
-              try {
-                sessionRef.current?.sendRealtimeInput({
-                  text: "Hello! I just connected to the live session. Please greet me in your opening style.",
-                });
-              } catch (greetingErr) {
-                console.warn("Failed to send initial greeting prompt:", greetingErr);
+              if (sessionRef.current) {
+                startVideoCapture();
+                try {
+                  sessionRef.current.sendRealtimeInput({
+                    text: "Hello! I just connected to the live session. Please greet me in your opening style.",
+                  });
+                } catch (greetingErr) {
+                  console.warn("Failed to send initial greeting prompt:", greetingErr);
+                }
               }
             },
             onmessage: async (message: LiveServerMessage) => {
@@ -581,9 +575,13 @@ export function useGeminiLive(
                   if (name === "get_ui_state") {
                     toolData = (window as any).LiveCommerceState ?? { stage: "idle" };
                   } else {
-                    const rawResult = await webMcp.executeTool(name ?? "", id ?? "", args);
-                    toolData = unwrapMcpResult(rawResult as any);
-                    (window as any).LiveCommerce?.ingest(toolData);
+                    try {
+                      const rawResult = await callCatalogMcp(name ?? "", id ?? "", args);
+                      toolData = unwrapMcpResult(rawResult as any);
+                      (window as any).LiveCommerce?.ingest(toolData);
+                    } catch (toolErr: any) {
+                      toolData = toolErr;
+                    }
                   }
 
                   onToolResult?.(toolData);
@@ -659,11 +657,6 @@ export function useGeminiLive(
               setIsConnected(false);
               setStatus("idle");
               setSessionDurationMs(0);
-
-              if (!manualDisconnectRef.current) {
-                toast.error("Live session closed unexpectedly");
-              }
-
               manualDisconnectRef.current = false;
             },
             onerror: (error: any) => {
@@ -680,13 +673,25 @@ export function useGeminiLive(
               setSessionDurationMs(0);
               manualDisconnectRef.current = true;
 
-              toast.error(error instanceof Error ? error.message : "Live API error");
+              if (error) {
+                toast.error(error.message || String(error));
+              }
             },
           },
         });
 
         sessionRef.current = session;
-      } catch (error) {
+        if (isSessionOpenRef.current) {
+          startVideoCapture();
+          try {
+            session.sendRealtimeInput({
+              text: "Hello! I just connected to the live session. Please greet me in your opening style.",
+            });
+          } catch {
+            // ignore
+          }
+        }
+      } catch (error: any) {
         isSessionOpenRef.current = false;
 
         cleanupMedia();
@@ -698,9 +703,9 @@ export function useGeminiLive(
         setSessionDurationMs(0);
         manualDisconnectRef.current = false;
 
-        toast.error(
-          error instanceof Error ? error.message : "Failed to start the live session",
-        );
+        if (error) {
+          toast.error(error.message || String(error));
+        }
       }
     },
     [
@@ -719,6 +724,16 @@ export function useGeminiLive(
   const sendText = useCallback((text: string) => {
     if (!sessionRef.current || !isSessionOpenRef.current) return;
     sessionRef.current.sendRealtimeInput({ text });
+  }, []);
+
+  const sendImage = useCallback((base64Data: string, mimeType: string = "image/jpeg") => {
+    if (!sessionRef.current || !isSessionOpenRef.current) return;
+    sessionRef.current.sendRealtimeInput({
+      video: {
+        data: base64Data,
+        mimeType,
+      },
+    });
   }, []);
 
   const toggleMute = useCallback(() => {
@@ -769,6 +784,7 @@ export function useGeminiLive(
     startConnection,
     disconnect,
     sendText,
+    sendImage,
     toggleMute,
     toggleVideo,
     flipCamera,

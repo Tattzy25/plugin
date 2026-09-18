@@ -1,14 +1,16 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { LiveOrb } from "@/components/ui/live-orb";
 import { CameraPreview } from "@/components/video/camera_preview";
 import { LiveCommerce } from "../commerce";
 import { useGeminiLive } from "@/hooks/gemini_live";
 
 import { SYSTEM_MESSAGE_SETTINGS } from "@/lib/SystemMessage";
-import { Mic, MicOff, Video, VideoOff, Phone, PhoneOff, RefreshCw } from "lucide-react";
+import { Image as ImageIcon, Phone, PhoneOff, RefreshCw, Loader2 } from "lucide-react";
 
 export function App() {
   const stageRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isSearchingImage, setIsSearchingImage] = useState(false);
 
   const {
     startConnection,
@@ -18,16 +20,50 @@ export function App() {
     videoRef,
     canvasRef,
     mediaStream,
+    sendText,
+    sendImage,
     isAudioPlaying,
     isUserTalking,
     micVolume,
-    isMuted,
-    toggleMute,
     isVideoEnabled,
-    toggleVideo,
     cameraFacing,
     flipCamera,
   } = useGeminiLive(SYSTEM_MESSAGE_SETTINGS);
+
+  const handleCommerceIntent = (intent: any) => {
+    if (intent.type === "add_to_cart") {
+      sendText("Please add this item to my cart.");
+    } else if (intent.type === "checkout") {
+      sendText("I am ready to proceed to checkout.");
+    } else if (intent.type === "update_qty") {
+      sendText(`Update item quantity to ${intent.qty}.`);
+    } else if (intent.type === "remove_line") {
+      sendText("Remove this item from my cart.");
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsSearchingImage(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const base64Data = (reader.result as string).split(",")[1];
+        if (!base64Data) return;
+
+        sendImage(base64Data, file.type || "image/jpeg");
+        sendText("I just shared this photo. Please look at it and check our store catalog for matching products or answer any questions about it.");
+      } finally {
+        setIsSearchingImage(false);
+      }
+    };
+    reader.onerror = () => setIsSearchingImage(false);
+    reader.readAsDataURL(file);
+
+    e.target.value = "";
+  };
 
   return (
     <div
@@ -84,7 +120,7 @@ export function App() {
 
       {/* Live Commerce Layer (Products, Details, Cart, Checkout) */}
       <div className="w-full max-w-4xl z-30 pointer-events-auto">
-        <LiveCommerce sessionActive={isConnected} />
+        <LiveCommerce sessionActive={isConnected} onIntent={handleCommerceIntent} />
       </div>
 
       {/* Draggable Camera Preview */}
@@ -112,42 +148,37 @@ export function App() {
             </button>
           ) : (
             <>
-              {/* Mic Toggle */}
+              {/* Image Search Button */}
               <button
-                onClick={toggleMute}
-                aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
-                className={`p-3 rounded-full transition-all cursor-pointer ${
-                  isMuted
-                    ? "bg-red-500/20 text-red-400 border border-red-500/40"
-                    : "bg-zinc-800 hover:bg-zinc-700 text-white"
-                }`}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isSearchingImage}
+                aria-label="Upload photo to search products"
+                title="Search products by photo"
+                className="p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white transition-all cursor-pointer disabled:opacity-50"
               >
-                {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                {isSearchingImage ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
+                ) : (
+                  <ImageIcon className="w-5 h-5" />
+                )}
               </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+              />
 
-              {/* Video Toggle */}
+              {/* Flip Camera */}
               <button
-                onClick={toggleVideo}
-                aria-label={isVideoEnabled ? "Disable camera" : "Enable camera"}
-                className={`p-3 rounded-full transition-all cursor-pointer ${
-                  !isVideoEnabled
-                    ? "bg-zinc-800 text-zinc-500"
-                    : "bg-zinc-800 hover:bg-zinc-700 text-white"
-                }`}
+                onClick={flipCamera}
+                aria-label="Flip camera"
+                title="Flip camera"
+                className="p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white transition-all cursor-pointer"
               >
-                {isVideoEnabled ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
+                <RefreshCw className="w-5 h-5" />
               </button>
-
-              {/* Flip Camera (if video active) */}
-              {isVideoEnabled && (
-                <button
-                  onClick={flipCamera}
-                  aria-label="Flip camera"
-                  className="p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white transition-all cursor-pointer"
-                >
-                  <RefreshCw className="w-5 h-5" />
-                </button>
-              )}
 
               {/* End Call */}
               <button

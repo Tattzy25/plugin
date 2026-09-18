@@ -18,10 +18,6 @@
       "source": "/(.*)",
       "headers": [
         {
-          "key": "Origin-Trial",
-          "value": "A+iUNy2ZZSfLBgsmKcRMcXiyk5Ldb0cuWmnIvGMgNCIQLZkjs68qaMhfBThdwlDdwniBeWUCYpBOwymkKN3cFQAAAAB4eyJvcmlnaW4iOiJodHRwczovL2dsb2JhbC50YXR0dHkuY29tOjQ0MyIsImZlYXR1cmUiOiJXZWJNQ1AiLCJleHBpcnkiOjE3OTQ4NzM2MDAsImlzU3ViZG9tYWluIjp0cnVlLCJpc1RoaXJkUGFydHkiOnRydWV9"
-        },
-        {
           "key": "Access-Control-Allow-Origin",
           "value": "*"
         },
