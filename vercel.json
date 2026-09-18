@@ -1,6 +1,8 @@
 {
+  "installCommand": "cd plugin && pnpm install",
   "buildCommand": "cd plugin && pnpm run build",
   "outputDirectory": "plugin/dist",
+
   "rewrites": [
     {
       "source": "/api/(.*)",
