@@ -6,7 +6,7 @@ import { callCatalogMcp } from "../lib/MCP/catalogCall";
 
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
-const OUTPUT_PREBUFFER_SAMPLES = 2400;
+const OUTPUT_PREBUFFER_SAMPLES = 4800;
 const VIDEO_INTERVAL_MS = 500;
 
 
@@ -72,6 +72,7 @@ export function useGeminiLive(
   const [micVolume, setMicVolume] = useState(0);
   const [isUserTalking, setIsUserTalking] = useState(false);
   const [status, setStatus] = useState<"idle" | "connecting" | "live" | "error">("idle");
+  const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [sessionDurationMs, setSessionDurationMs] = useState(0);
   const [consentTranscription, setConsentTranscriptionState] = useState(false);
@@ -79,6 +80,7 @@ export function useGeminiLive(
 
   const isMutedRef = useRef(false);
   const isVideoEnabledRef = useRef(true);
+  const isAudioPlayingRef = useRef(false);
   const cameraFacingRef = useRef<"user" | "environment">("user");
   const isSessionOpenRef = useRef(false);
   const manualDisconnectRef = useRef(false);
@@ -200,6 +202,7 @@ export function useGeminiLive(
     pendingOutputRef.current = [];
     pendingOutputSamplesRef.current = 0;
     playbackPrimedRef.current = false;
+    isAudioPlayingRef.current = false;
     setIsAudioPlaying(false);
     outputNodeRef.current?.port.postMessage({ type: "flush" });
   }, []);
@@ -216,6 +219,7 @@ export function useGeminiLive(
       if (pendingOutputSamplesRef.current < OUTPUT_PREBUFFER_SAMPLES) return;
 
       playbackPrimedRef.current = true;
+      isAudioPlayingRef.current = true;
       setIsAudioPlaying(true);
 
       while (pendingOutputRef.current.length) {
@@ -230,16 +234,17 @@ export function useGeminiLive(
       return;
     }
 
+    isAudioPlayingRef.current = true;
     setIsAudioPlaying(true);
 
-    const chunk = pendingOutputRef.current.shift();
-    if (!chunk) return;
-
-    pendingOutputSamplesRef.current -= chunk.length;
-    outputNodeRef.current?.port.postMessage(
-      { type: "chunk", buffer: chunk.buffer },
-      [chunk.buffer],
-    );
+    while (pendingOutputRef.current.length) {
+      const chunk = pendingOutputRef.current.shift()!;
+      pendingOutputSamplesRef.current -= chunk.length;
+      outputNodeRef.current?.port.postMessage(
+        { type: "chunk", buffer: chunk.buffer },
+        [chunk.buffer],
+      );
+    }
   }, []);
 
   const captureFrame = useCallback(() => {
@@ -319,6 +324,8 @@ export function useGeminiLive(
 
       outputNodeRef.current.port.onmessage = (event: MessageEvent) => {
         if (event.data?.type === "underrun") {
+          playbackPrimedRef.current = false;
+          isAudioPlayingRef.current = false;
           setIsAudioPlaying(false);
         }
       };
@@ -419,6 +426,21 @@ export function useGeminiLive(
       try {
         const pcm = new Int16Array(event.data);
 
+        // Acoustic Echo Suppression Gate:
+        // When the assistant is actively speaking through the speakers,
+        // drop low-amplitude speaker bleed so Gemini's server-side VAD doesn't self-interrupt.
+        // If the user intentionally speaks loudly to barge in (peak >= 4500), let it through!
+        if (isAudioPlayingRef.current) {
+          let peak = 0;
+          for (let i = 0; i < pcm.length; i++) {
+            const abs = Math.abs(pcm[i]);
+            if (abs > peak) peak = abs;
+          }
+          if (peak < 4500) {
+            return;
+          }
+        }
+
         sessionRef.current.sendRealtimeInput({
           audio: {
             data: pcm16ToBase64(pcm),
@@ -483,6 +505,7 @@ export function useGeminiLive(
 
     setIsConnected(false);
     setStatus("idle");
+    setConnectionNotice(null);
     setTranscript([]);
     setSessionDurationMs(0);
   }, [cleanupMedia, endSessionTracking, resetPlayback]);
@@ -491,34 +514,45 @@ export function useGeminiLive(
     async (selectedVoice: string) => {
       try {
         setStatus("connecting");
+        setConnectionNotice("Connecting to your personal shopper...");
         manualDisconnectRef.current = false;
 
-        await initAudio();
-        await startStreaming();
+        // Pre-flight check: ensure tools are loaded from server (3 retries built-in)
+        const { tools: sessionTools } = await getPopulatedSessionTools();
+        const hasCatalogTools = sessionTools?.[0]?.functionDeclarations?.some(
+          (d) => d.name !== "get_ui_state",
+        );
 
+        if (!hasCatalogTools) {
+          setStatus("error");
+          setConnectionNotice("All lines are currently busy with other shoppers. Please try again in a moment.");
+          return;
+        }
+
+        // Ephemeral token check
         const tokenResponse = await fetch("/api/session-token", { method: "POST" });
-        const { token: ephemeralToken, error: tokenError } = await tokenResponse.json();
+        const { token: ephemeralToken } = await tokenResponse.json();
 
         if (!ephemeralToken) {
-          throw new Error(tokenError || "Failed to get session token");
+          setStatus("error");
+          setConnectionNotice("All lines are currently busy with other shoppers. Please try again in a moment.");
+          return;
         }
+
+        // Initialize audio and media streams only after tools and token are verified
+        await initAudio();
+        await startStreaming();
 
         const ai = new GoogleGenAI({
           apiKey: ephemeralToken,
           httpOptions: { apiVersion: "v1alpha" },
         });
 
-        const { tools: sessionTools, error: mcpError } = await getPopulatedSessionTools();
-
-        const systemInstructionText = mcpError
-          ? `${systemMessageSettings.systemInstruction}\n\n[MCP Server Status: ${mcpError}]`
-          : systemMessageSettings.systemInstruction;
-
         const session = await ai.live.connect({
           model: systemMessageSettings.model || "gemini-3.1-flash-live-preview",
           config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: systemInstructionText,
+            systemInstruction: systemMessageSettings.systemInstruction,
             thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
 
             tools: sessionTools as any,
@@ -545,6 +579,7 @@ export function useGeminiLive(
               isSessionOpenRef.current = true;
               setIsConnected(true);
               setStatus("live");
+              setConnectionNotice(null);
               resetPlayback();
               beginSessionTracking();
 
@@ -656,10 +691,11 @@ export function useGeminiLive(
               sessionRef.current = null;
               setIsConnected(false);
               setStatus("idle");
+              setConnectionNotice(null);
               setSessionDurationMs(0);
               manualDisconnectRef.current = false;
             },
-            onerror: (error: any) => {
+            onerror: () => {
               isSessionOpenRef.current = false;
               resumptionHandleRef.current = null;
 
@@ -670,12 +706,9 @@ export function useGeminiLive(
               sessionRef.current = null;
               setStatus("error");
               setIsConnected(false);
+              setConnectionNotice("All lines are currently busy with other shoppers. Please try again in a moment.");
               setSessionDurationMs(0);
               manualDisconnectRef.current = true;
-
-              if (error) {
-                toast.error(error.message || String(error));
-              }
             },
           },
         });
@@ -691,7 +724,7 @@ export function useGeminiLive(
             // ignore
           }
         }
-      } catch (error: any) {
+      } catch {
         isSessionOpenRef.current = false;
 
         cleanupMedia();
@@ -700,12 +733,9 @@ export function useGeminiLive(
         sessionRef.current = null;
         setStatus("error");
         setIsConnected(false);
+        setConnectionNotice("All lines are currently busy with other shoppers. Please try again in a moment.");
         setSessionDurationMs(0);
         manualDisconnectRef.current = false;
-
-        if (error) {
-          toast.error(error.message || String(error));
-        }
       }
     },
     [
@@ -777,6 +807,7 @@ export function useGeminiLive(
     isUserTalking,
     transcript,
     status,
+    connectionNotice,
     sessionDurationMs,
     videoRef,
     canvasRef,

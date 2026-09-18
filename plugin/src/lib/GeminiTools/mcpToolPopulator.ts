@@ -171,11 +171,21 @@ export async function fetchMcpToolDeclarations(
   }
 }
 
-export async function getPopulatedSessionTools(): Promise<{
+export async function getPopulatedSessionTools(maxRetries = 3): Promise<{
   tools: Array<{ functionDeclarations: GeminiFunctionDeclaration[] }>;
   error?: string;
 }> {
-  const result = await fetchMcpToolDeclarations(MCP_ENDPOINT);
+  let result: McpDiscoveryResult = { declarations: [], error: "" };
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    result = await fetchMcpToolDeclarations(MCP_ENDPOINT);
+    if (result.declarations.length > 0) {
+      break;
+    }
+    if (attempt < maxRetries) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+  }
 
   if (result.declarations.length > 0) {
     return {
@@ -190,7 +200,7 @@ export async function getPopulatedSessionTools(): Promise<{
     };
   }
 
-  // If live fetch was delayed or had a transient network issue, load the previously saved server declarations
+  // If live fetch had a transient network issue, check dynamically cached server declarations
   let savedDeclarations: GeminiFunctionDeclaration[] = [];
   if (typeof window !== "undefined") {
     try {
@@ -203,16 +213,23 @@ export async function getPopulatedSessionTools(): Promise<{
     }
   }
 
+  if (savedDeclarations.length > 0) {
+    return {
+      tools: [
+        {
+          functionDeclarations: [
+            ...savedDeclarations,
+            ...UI_TOOLS[0].functionDeclarations,
+          ],
+        },
+      ],
+    };
+  }
+
+  // Strictly return empty tools if server tools could not be loaded
   return {
-    tools: [
-      {
-        functionDeclarations: [
-          ...savedDeclarations,
-          ...UI_TOOLS[0].functionDeclarations,
-        ],
-      },
-    ],
-    error: result.error,
+    tools: [],
+    error: result.error || "busy",
   };
 }
 

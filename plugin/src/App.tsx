@@ -17,6 +17,7 @@ export function App() {
     disconnect,
     isConnected,
     status,
+    connectionNotice,
     videoRef,
     canvasRef,
     mediaStream,
@@ -84,7 +85,7 @@ export function App() {
                 : status === "connecting"
                 ? "bg-amber-500 animate-ping"
                 : status === "error"
-                ? "bg-red-500"
+                ? "bg-amber-500/80"
                 : "bg-zinc-600"
             }`}
           />
@@ -98,7 +99,7 @@ export function App() {
               : status === "connecting"
               ? "Connecting..."
               : status === "error"
-              ? "Connection Error"
+              ? "Lines Busy"
               : "Ready"}
           </span>
         </div>
@@ -116,6 +117,11 @@ export function App() {
             size={280}
           />
         </div>
+        {connectionNotice && (
+          <div className="mt-4 px-5 py-2 rounded-full bg-zinc-900/90 border border-zinc-800 text-zinc-300 text-xs tracking-wide shadow-xl backdrop-blur-md text-center max-w-md">
+            {connectionNotice}
+          </div>
+        )}
       </main>
 
       {/* Live Commerce Layer (Products, Details, Cart, Checkout) */}
