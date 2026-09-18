@@ -7,8 +7,8 @@
  */
 
 import { cleanJsonSchemaForGemini, type GeminiFunctionDeclaration } from "../GeminiTools/mcpToolPopulator";
-import { MCP_ENDPOINT, AGENT_PROFILE_URL } from "../GeminiTools/config";
 import { callCatalogMcp } from "./catalogCall";
+
 
 export interface WebMcpToolDescriptor {
   name: string;
