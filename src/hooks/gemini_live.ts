@@ -105,6 +105,7 @@ export function useGeminiLive(
   const streamRef = useRef<MediaStream | null>(null);
   const sessionRef = useRef<any>(null);
   const videoIntervalRef = useRef<number | null>(null);
+  const isCapturingRef = useRef(false);
 
   const pendingOutputRef = useRef<Int16Array[]>([]);
   const pendingOutputSamplesRef = useRef(0);
@@ -156,6 +157,7 @@ export function useGeminiLive(
       window.clearInterval(videoIntervalRef.current);
       videoIntervalRef.current = null;
     }
+    isCapturingRef.current = false;
   }, []);
 
   const cleanupMedia = useCallback(() => {
@@ -252,7 +254,15 @@ export function useGeminiLive(
   }, []);
 
   const captureFrame = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current || !sessionRef.current || !isSessionOpenRef.current) return;
+    if (
+      !videoRef.current ||
+      !canvasRef.current ||
+      !sessionRef.current ||
+      !isSessionOpenRef.current ||
+      isCapturingRef.current
+    ) {
+      return;
+    }
 
     if (videoRef.current.srcObject !== streamRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
@@ -265,21 +275,38 @@ export function useGeminiLive(
     const context = canvas.getContext("2d");
     if (!context) return;
 
+    isCapturingRef.current = true;
     context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
 
-    const base64Data = canvas.toDataURL("image/jpeg", 0.5).split(",")[1];
-    if (!base64Data) return;
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          isCapturingRef.current = false;
+          return;
+        }
 
-    try {
-      sessionRef.current.sendRealtimeInput({
-        video: {
-          data: base64Data,
-          mimeType: "image/jpeg",
-        },
-      });
-    } catch {
-      // ignore
-    }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          isCapturingRef.current = false;
+          const base64Data = (reader.result as string)?.split(",")[1];
+          if (base64Data && sessionRef.current && isSessionOpenRef.current) {
+            try {
+              sessionRef.current.sendRealtimeInput({
+                video: { data: base64Data, mimeType: "image/jpeg" },
+              });
+            } catch {
+              // ignore
+            }
+          }
+        };
+        reader.onerror = () => {
+          isCapturingRef.current = false;
+        };
+        reader.readAsDataURL(blob);
+      },
+      "image/jpeg",
+      0.5,
+    );
   }, []);
 
   const startVideoCapture = useCallback(() => {
