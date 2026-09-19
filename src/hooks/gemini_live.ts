@@ -40,22 +40,27 @@ function base64ToPCM16(base64: string): Int16Array {
 }
 
 function unwrapMcpResult(payload: any): unknown {
-  if (payload?.error) {
-    return payload.error;
-  }
+  if (!payload || typeof payload !== "object") return payload;
+  if (payload.error) return payload.error;
+
   const text = payload?.result?.content?.find(
     (content: any) => content?.type === "text" && typeof content?.text === "string",
   )?.text;
 
-  if (!text) {
-    return payload?.result?.structuredContent ?? payload?.result ?? payload;
+  if (text) {
+    try {
+      const parsed = JSON.parse(text);
+      return unwrapMcpResult(parsed);
+    } catch {
+      return text;
+    }
   }
 
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
+  if (payload.jsonrpc && payload.result !== undefined) {
+    return unwrapMcpResult(payload.result);
   }
+
+  return payload;
 }
 
 export function useGeminiLive(
