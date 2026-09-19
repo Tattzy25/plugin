@@ -520,7 +520,7 @@
           "description": "The catalog object containing the search parameters. All parameters are wrapped in a catalog object. Refer to the UCP catalog search spec for the complete schema."
         }
       },
-      "required": ["shop_domain", "catalog"]
+      "required": ["catalog"]
     }
   },
   {
@@ -587,7 +587,7 @@
           "description": "The catalog object containing the lookup parameters. All parameters are wrapped in a catalog object. Refer to the UCP catalog lookup spec forthe complete schema."
         }
       },
-      "required": ["shop_domain", "catalog"]
+      "required": ["catalog"]
     }
   },
   {
@@ -671,7 +671,7 @@
           "description": "The catalog object containing the product lookup parameters. All parameters are wrapped in a catalog object. Refer to the UCP catalog lookup spec for the complete schema."
         }
       },
-      "required": ["shop_domain", "catalog"]
+      "required": ["catalog"]
     }
   },
   {

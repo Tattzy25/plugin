@@ -1,14 +1,11 @@
 import { AGENT_PROFILE_URL, MCP_ENDPOINT } from "../GeminiTools/config";
 
-let rpcIdCounter = 1;
-
 export async function callCatalogMcp(
   name: string,
   id: string,
   args: unknown,
 ) {
   try {
-    const rpcId = typeof id === "number" ? id : (parseInt(id, 10) || rpcIdCounter++);
     const rawArgs = (args && typeof args === "object" ? args : {}) as Record<string, any>;
 
     const meta = {
@@ -37,21 +34,13 @@ export async function callCatalogMcp(
     }
 
     const payloadArgs: Record<string, any> = {
-      ...rawArgs,
-      meta,
       ...(catalog ? { catalog } : {}),
+      meta,
+      ...rawArgs,
     };
 
-    let targetName = name;
-    if (name === "search_catalog" && !payloadArgs.shop_domain) {
-      targetName = "global_search_catalog";
-    } else if (name === "get_product" && !payloadArgs.shop_domain) {
-      targetName = "global_get_product";
-    } else if (name === "lookup_catalog" && !payloadArgs.shop_domain) {
-      targetName = "global_lookup_catalog";
-    }
-
-    if (catalog && targetName === "global_search_catalog") {
+    if (catalog) {
+      payloadArgs.catalog = catalog;
       delete payloadArgs.query;
     }
 
@@ -63,10 +52,10 @@ export async function callCatalogMcp(
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
-        id: rpcId,
+        id,
         method: "tools/call",
         params: {
-          name: targetName,
+          name,
           arguments: payloadArgs,
         },
       }),
