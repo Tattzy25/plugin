@@ -19,7 +19,6 @@ export function App() {
     status,
     videoRef,
     canvasRef,
-    mediaStream,
     sendText,
     sendImage,
     isAudioPlaying,
