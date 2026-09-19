@@ -5,7 +5,7 @@ import { LiveCommerce } from "../commerce";
 import { useGeminiLive } from "@/hooks/gemini_live";
 
 import { SYSTEM_MESSAGE_SETTINGS } from "@/lib/SystemMessage";
-import { Image as ImageIcon, Phone, PhoneOff, RefreshCw, Loader2 } from "lucide-react";
+import { Image as ImageIcon, Phone, PhoneOff, RefreshCw, Loader2, Video, VideoOff } from "lucide-react";
 
 export function App() {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -17,7 +17,6 @@ export function App() {
     disconnect,
     isConnected,
     status,
-    connectionNotice,
     videoRef,
     canvasRef,
     mediaStream,
@@ -27,6 +26,7 @@ export function App() {
     isUserTalking,
     micVolume,
     isVideoEnabled,
+    toggleVideo,
     cameraFacing,
     flipCamera,
   } = useGeminiLive(SYSTEM_MESSAGE_SETTINGS);
@@ -84,8 +84,6 @@ export function App() {
                   : "bg-green-500"
                 : status === "connecting"
                 ? "bg-amber-500 animate-ping"
-                : status === "error"
-                ? "bg-amber-500/80"
                 : "bg-zinc-600"
             }`}
           />
@@ -98,8 +96,6 @@ export function App() {
                 : "Connected"
               : status === "connecting"
               ? "Connecting..."
-              : status === "error"
-              ? "Lines Busy"
               : "Ready"}
           </span>
         </div>
@@ -117,11 +113,6 @@ export function App() {
             size={280}
           />
         </div>
-        {connectionNotice && (
-          <div className="mt-4 px-5 py-2 rounded-full bg-zinc-900/90 border border-zinc-800 text-zinc-300 text-xs tracking-wide shadow-xl backdrop-blur-md text-center max-w-md">
-            {connectionNotice}
-          </div>
-        )}
       </main>
 
       {/* Live Commerce Layer (Products, Details, Cart, Checkout) */}
@@ -176,15 +167,31 @@ export function App() {
                 className="hidden"
               />
 
-              {/* Flip Camera */}
+              {/* Video Toggle */}
               <button
-                onClick={flipCamera}
-                aria-label="Flip camera"
-                title="Flip camera"
-                className="p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white transition-all cursor-pointer"
+                onClick={toggleVideo}
+                aria-label={isVideoEnabled ? "Disable camera" : "Enable camera"}
+                title={isVideoEnabled ? "Disable camera" : "Enable camera"}
+                className={`p-3 rounded-full transition-all cursor-pointer ${
+                  !isVideoEnabled
+                    ? "bg-zinc-800 text-zinc-500 hover:text-white"
+                    : "bg-zinc-800 hover:bg-zinc-700 text-white"
+                }`}
               >
-                <RefreshCw className="w-5 h-5" />
+                {isVideoEnabled ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
               </button>
+
+              {/* Flip Camera (if video active) */}
+              {isVideoEnabled && (
+                <button
+                  onClick={flipCamera}
+                  aria-label="Flip camera"
+                  title="Flip camera"
+                  className="p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-white transition-all cursor-pointer"
+                >
+                  <RefreshCw className="w-5 h-5" />
+                </button>
+              )}
 
               {/* End Call */}
               <button

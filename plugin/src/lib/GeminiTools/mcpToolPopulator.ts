@@ -84,7 +84,7 @@ export function cleanJsonSchemaForGemini(schema: unknown): GeminiFunctionDeclara
 }
 
 /**
- * Parses raw MCP response (supporting standard JSON and SSE data streams)
+ * Parses raw MCP JSON-RPC response
  */
 export function parseMcpResponse<T = unknown>(rawBody: string): T {
   const eventData = rawBody
@@ -97,16 +97,14 @@ export function parseMcpResponse<T = unknown>(rawBody: string): T {
   return JSON.parse(eventData || rawBody) as T;
 }
 
-const MCP_TOOLS_CACHE_KEY = "mcp_tool_declarations_cache";
-
 export interface McpDiscoveryResult {
   declarations: GeminiFunctionDeclaration[];
   error?: string;
 }
 
 /**
- * Fetches the live tools from the MCP server and converts them to Gemini function declarations.
- * Saves dynamically to localStorage so runtime is instant without hardcoded files.
+ * Fetches the live tools directly from the MCP server and converts them to Gemini function declarations.
+ * Pure dynamic execution: ZERO silent fallbacks, ZERO local caching.
  */
 export async function fetchMcpToolDeclarations(
   endpoint: string = MCP_ENDPOINT,
@@ -120,7 +118,7 @@ export async function fetchMcpToolDeclarations(
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
-        id: "tools-list-" + Date.now(),
+        id: 1,
         method: "tools/list",
         params: {},
       }),
@@ -153,15 +151,6 @@ export async function fetchMcpToolDeclarations(
       parameters: cleanJsonSchemaForGemini(tool.inputSchema),
     }));
 
-    // Dynamically save whatever the server returned so runtime doesn't hang
-    if (typeof window !== "undefined" && declarations.length > 0) {
-      try {
-        localStorage.setItem(MCP_TOOLS_CACHE_KEY, JSON.stringify(declarations));
-      } catch {
-        // ignore
-      }
-    }
-
     return { declarations };
   } catch (err: any) {
     return {
@@ -171,65 +160,20 @@ export async function fetchMcpToolDeclarations(
   }
 }
 
-export async function getPopulatedSessionTools(maxRetries = 3): Promise<{
+import { CATALOG_TOOLS } from "./catalog.tools";
+
+export function getPopulatedSessionTools(): {
   tools: Array<{ functionDeclarations: GeminiFunctionDeclaration[] }>;
-  error?: string;
-}> {
-  let result: McpDiscoveryResult = { declarations: [], error: "" };
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    result = await fetchMcpToolDeclarations(MCP_ENDPOINT);
-    if (result.declarations.length > 0) {
-      break;
-    }
-    if (attempt < maxRetries) {
-      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
-    }
-  }
-
-  if (result.declarations.length > 0) {
-    return {
-      tools: [
-        {
-          functionDeclarations: [
-            ...result.declarations,
-            ...UI_TOOLS[0].functionDeclarations,
-          ],
-        },
-      ],
-    };
-  }
-
-  // If live fetch had a transient network issue, check dynamically cached server declarations
-  let savedDeclarations: GeminiFunctionDeclaration[] = [];
-  if (typeof window !== "undefined") {
-    try {
-      const cached = localStorage.getItem(MCP_TOOLS_CACHE_KEY);
-      if (cached) {
-        savedDeclarations = JSON.parse(cached);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  if (savedDeclarations.length > 0) {
-    return {
-      tools: [
-        {
-          functionDeclarations: [
-            ...savedDeclarations,
-            ...UI_TOOLS[0].functionDeclarations,
-          ],
-        },
-      ],
-    };
-  }
-
-  // Strictly return empty tools if server tools could not be loaded
+} {
   return {
-    tools: [],
-    error: result.error || "busy",
+    tools: [
+      {
+        functionDeclarations: [
+          ...CATALOG_TOOLS[0].functionDeclarations,
+          ...UI_TOOLS[0].functionDeclarations,
+        ],
+      },
+    ],
   };
 }
 
