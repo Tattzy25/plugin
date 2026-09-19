@@ -1,10 +1,11 @@
 import { useCallback, useRef, useState } from "react";
-import { GoogleGenAI, Modality, ThinkingLevel, type LiveServerMessage } from "@google/genai";
+import { GoogleGenAI, Modality, type LiveServerMessage } from "@google/genai";
 import { CATALOG_TOOLS, UI_TOOLS } from "../lib/GeminiTools";
 import { callCatalogMcp } from "../lib/MCP/catalogCall";
 
 const INPUT_RATE = 16000;
 const OUTPUT_RATE = 24000;
+const OUTPUT_PREBUFFER_SAMPLES = 2400;
 const VIDEO_INTERVAL_MS = 500;
 
 
@@ -30,9 +31,10 @@ function pcm16ToBase64(pcm: Int16Array): string {
 
 function base64ToPCM16(base64: string): Int16Array {
   const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
+  const sampleCount = Math.floor(binary.length / 2);
+  const bytes = new Uint8Array(sampleCount * 2);
 
-  for (let i = 0; i < binary.length; i += 1) {
+  for (let i = 0; i < bytes.length; i += 1) {
     bytes[i] = binary.charCodeAt(i);
   }
 
@@ -104,6 +106,9 @@ export function useGeminiLive(
   const sessionRef = useRef<any>(null);
   const videoIntervalRef = useRef<number | null>(null);
 
+  const pendingOutputRef = useRef<Int16Array[]>([]);
+  const pendingOutputSamplesRef = useRef(0);
+  const playbackPrimedRef = useRef(false);
   const connectedAtRef = useRef<number | null>(null);
   const durationIntervalRef = useRef<number | null>(null);
   const resumptionHandleRef = useRef<string | null>(null);
@@ -198,6 +203,9 @@ export function useGeminiLive(
   }, [stopVideoCapture]);
 
   const resetPlayback = useCallback(() => {
+    pendingOutputRef.current = [];
+    pendingOutputSamplesRef.current = 0;
+    playbackPrimedRef.current = false;
     isAudioPlayingRef.current = false;
     setIsAudioPlaying(false);
     outputNodeRef.current?.port.postMessage({ type: "flush" });
@@ -208,11 +216,38 @@ export function useGeminiLive(
       void outputCtxRef.current.resume().catch(console.warn);
     }
 
+    pendingOutputRef.current.push(pcm);
+    pendingOutputSamplesRef.current += pcm.length;
+
+    if (!playbackPrimedRef.current) {
+      if (pendingOutputSamplesRef.current < OUTPUT_PREBUFFER_SAMPLES) return;
+
+      playbackPrimedRef.current = true;
+      isAudioPlayingRef.current = true;
+      setIsAudioPlaying(true);
+
+      while (pendingOutputRef.current.length) {
+        const chunk = pendingOutputRef.current.shift()!;
+        pendingOutputSamplesRef.current -= chunk.length;
+        outputNodeRef.current?.port.postMessage(
+          { type: "chunk", buffer: chunk.buffer },
+          [chunk.buffer],
+        );
+      }
+
+      return;
+    }
+
     isAudioPlayingRef.current = true;
     setIsAudioPlaying(true);
+
+    const chunk = pendingOutputRef.current.shift();
+    if (!chunk) return;
+
+    pendingOutputSamplesRef.current -= chunk.length;
     outputNodeRef.current?.port.postMessage(
-      { type: "chunk", buffer: pcm.buffer },
-      [pcm.buffer],
+      { type: "chunk", buffer: chunk.buffer },
+      [chunk.buffer],
     );
   }, []);
 
@@ -232,7 +267,7 @@ export function useGeminiLive(
 
     context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
 
-    const base64Data = canvas.toDataURL("image/jpeg", 0.75).split(",")[1];
+    const base64Data = canvas.toDataURL("image/jpeg", 0.5).split(",")[1];
     if (!base64Data) return;
 
     try {
@@ -295,6 +330,7 @@ export function useGeminiLive(
         if (event.data?.type === "underrun") {
           isAudioPlayingRef.current = false;
           setIsAudioPlaying(false);
+          playbackPrimedRef.current = false;
         }
       };
 
@@ -518,7 +554,6 @@ export function useGeminiLive(
           config: {
             responseModalities: [Modality.AUDIO],
             systemInstruction: systemInstructionText,
-            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
 
             tools: sessionTools as any,
 

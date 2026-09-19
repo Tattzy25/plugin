@@ -206,7 +206,7 @@ export function App() {
       </footer>
 
       {/* Hidden Frame Capture Canvas for Video Processing */}
-      <canvas ref={canvasRef} width={1280} height={720} style={{ display: "none" }} />
+      <canvas ref={canvasRef} width={640} height={360} style={{ display: "none" }} />
     </div>
   );
 }
