@@ -1,12 +1,11 @@
 {
-  "installCommand": "cd plugin && pnpm install",
-  "buildCommand": "cd plugin && pnpm run build",
-  "outputDirectory": "plugin/dist",
-
+  "buildCommand": "pnpm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/plugin/api/$1"
+      "destination": "/api/$1"
     },
     {
       "source": "/(.*)",
