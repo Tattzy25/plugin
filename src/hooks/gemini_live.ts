@@ -64,7 +64,7 @@ export function useGeminiLive(
 ) {
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(false);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [micVolume, setMicVolume] = useState(0);
@@ -76,7 +76,7 @@ export function useGeminiLive(
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
   const isMutedRef = useRef(false);
-  const isVideoEnabledRef = useRef(false);
+  const isVideoEnabledRef = useRef(true);
   const isAudioPlayingRef = useRef(false);
   const cameraFacingRef = useRef<"user" | "environment">("user");
   const isSessionOpenRef = useRef(false);
@@ -298,17 +298,44 @@ export function useGeminiLive(
   }, []);
 
   const startStreaming = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: isVideoEnabledRef.current
+          ? {
+              facingMode: cameraFacingRef.current,
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 24, max: 30 },
+            }
+          : false,
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      setIsVideoEnabled(false);
+      isVideoEnabledRef.current = false;
+    }
 
     streamRef.current = stream;
     setMediaStream(stream);
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      void videoRef.current.play().catch(console.warn);
+    }
 
     const inputContext = inputCtxRef.current!;
     const source = inputContext.createMediaStreamSource(stream);
@@ -518,6 +545,10 @@ export function useGeminiLive(
               if (outputCtxRef.current?.state === "suspended") {
                 void outputCtxRef.current.resume().catch(console.warn);
               }
+
+              if (isVideoEnabledRef.current) {
+                startVideoCapture();
+              }
             },
             onmessage: async (message: LiveServerMessage) => {
               if (message.toolCall) {
@@ -691,7 +722,21 @@ export function useGeminiLive(
   }, []);
 
   const toggleVideo = useCallback(async () => {
-    if (!isVideoEnabledRef.current) {
+    const next = !isVideoEnabledRef.current;
+    isVideoEnabledRef.current = next;
+    setIsVideoEnabled(next);
+
+    const videoTracks = streamRef.current?.getVideoTracks() ?? [];
+    if (videoTracks.length > 0) {
+      videoTracks.forEach((track) => {
+        track.enabled = next;
+      });
+      if (!next) {
+        stopVideoCapture();
+      } else if (isSessionOpenRef.current) {
+        startVideoCapture();
+      }
+    } else if (next) {
       try {
         const videoStream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -709,25 +754,16 @@ export function useGeminiLive(
             videoRef.current.srcObject = streamRef.current;
             void videoRef.current.play().catch(console.warn);
           }
-          setIsVideoEnabled(true);
-          isVideoEnabledRef.current = true;
           if (isSessionOpenRef.current) {
             startVideoCapture();
           }
         }
       } catch (err) {
         console.warn("Could not enable camera:", err);
+        setIsVideoEnabled(false);
+        isVideoEnabledRef.current = false;
       }
     } else {
-      streamRef.current?.getVideoTracks().forEach((track) => {
-        track.stop();
-        streamRef.current?.removeTrack(track);
-      });
-      if (streamRef.current) {
-        setMediaStream(new MediaStream(streamRef.current.getTracks()));
-      }
-      setIsVideoEnabled(false);
-      isVideoEnabledRef.current = false;
       stopVideoCapture();
     }
   }, [startVideoCapture, stopVideoCapture]);

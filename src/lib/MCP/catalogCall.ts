@@ -39,7 +39,7 @@ export async function callCatalogMcp(
           ?.replace(/^data:\s*/, "") || rawBody,
       );
     } catch {
-      return rawBody;
+      return {};
     }
   } catch {
     return {};
